@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0f172a" />
+<title>人流アノマリー要因分析</title>
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon.svg" />
+<style>
+  :root{
+    --bg:#f5f7fa; --panel:#ffffff; --panel-2:#f0f3f7; --border:#dbe2ea;
+    --text:#0f172a; --muted:#5b6b7f; --accent:#2563eb; --accent-2:#1d4ed8;
+    --ok:#0f9d58; --warn:#c2410c; --danger:#b91c1c;
+    --code-bg:#f1f5f9; --shadow:0 1px 3px rgba(15,23,42,.08),0 8px 24px rgba(15,23,42,.06);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#0b1220; --panel:#111a2b; --panel-2:#0f1727; --border:#22304a;
+      --text:#e6edf6; --muted:#93a4bc; --accent:#3b82f6; --accent-2:#60a5fa;
+      --code-bg:#0d1626; --shadow:0 1px 2px rgba(0,0,0,.4),0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Hiragino Kaku Gothic ProN","Yu Gothic UI",Meiryo,sans-serif;
+    background:var(--bg); color:var(--text); line-height:1.65;
+    -webkit-text-size-adjust:100%;
+  }
+  header{
+    position:sticky; top:0; z-index:20;
+    background:linear-gradient(180deg,var(--panel),color-mix(in srgb,var(--panel) 85%,transparent));
+    backdrop-filter:saturate(160%) blur(10px);
+    border-bottom:1px solid var(--border);
+    padding:calc(env(safe-area-inset-top) + 12px) 16px 12px;
+  }
+  .brand{display:flex;align-items:center;gap:10px}
+  .brand .logo{width:30px;height:30px;flex:0 0 auto}
+  .brand h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
+  .brand p{margin:2px 0 0;font-size:11px;color:var(--muted)}
+  main{max-width:820px;margin:0 auto;padding:16px 16px calc(env(safe-area-inset-bottom) + 40px)}
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:16px; margin-bottom:16px;
+  }
+  .card h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 12px}
+  label{display:block;font-size:13px;font-weight:600;margin:0 0 6px}
+  .hint{font-weight:400;color:var(--muted);font-size:12px}
+  input,textarea,select{
+    width:100%; font:inherit; color:var(--text); background:var(--panel-2);
+    border:1px solid var(--border); border-radius:10px; padding:11px 12px; outline:none;
+  }
+  input:focus,textarea:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 25%,transparent)}
+  textarea{resize:vertical;min-height:64px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .field{margin-bottom:14px}
+  .field:last-child{margin-bottom:0}
+  .inline{display:flex;gap:8px;align-items:center}
+  button{
+    font:inherit;font-weight:700;cursor:pointer;border:none;border-radius:10px;
+    padding:12px 16px;color:#fff;background:var(--accent);transition:transform .05s ease,background .15s ease;
+  }
+  button:hover{background:var(--accent-2)}
+  button:active{transform:translateY(1px)}
+  button:disabled{opacity:.55;cursor:not-allowed}
+  button.secondary{background:var(--panel-2);color:var(--text);border:1px solid var(--border)}
+  button.secondary:hover{background:var(--border)}
+  .btn-row{display:flex;gap:10px;flex-wrap:wrap}
+  .btn-row button{flex:1;min-width:130px}
+  .run{width:100%;padding:15px;font-size:16px;margin-top:4px}
+  details.settings summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);list-style:none;display:flex;align-items:center;gap:6px}
+  details.settings summary::-webkit-details-marker{display:none}
+  details.settings summary::before{content:"⚙";}
+  .status{display:none;margin-top:12px}
+  .status.active{display:block}
+  .statusbar{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--muted);margin-bottom:10px}
+  .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;flex:0 0 auto}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .log{max-height:150px;overflow:auto;font-size:12px;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:8px 10px}
+  .log div{padding:2px 0;color:var(--muted);white-space:pre-wrap;word-break:break-word}
+  .log .tool{color:var(--accent-2);font-weight:600}
+  .report{display:none}
+  .report.active{display:block}
+  .report-actions{display:flex;gap:10px;justify-content:flex-end;margin-bottom:10px;flex-wrap:wrap}
+  .report-actions button{padding:8px 12px;font-size:13px}
+  .md{font-size:15px;word-break:break-word}
+  .md h1{font-size:22px;border-bottom:2px solid var(--border);padding-bottom:8px;margin:20px 0 12px}
+  .md h2{font-size:19px;margin:22px 0 10px;padding-bottom:4px;border-bottom:1px solid var(--border)}
+  .md h3{font-size:16px;margin:18px 0 8px}
+  .md h4{font-size:15px;margin:16px 0 6px}
+  .md p{margin:10px 0}
+  .md ul,.md ol{margin:10px 0;padding-left:22px}
+  .md li{margin:4px 0}
+  .md blockquote{margin:12px 0;padding:8px 14px;border-left:4px solid var(--accent);background:var(--panel-2);border-radius:0 8px 8px 0;color:var(--muted)}
+  .md code{background:var(--code-bg);padding:2px 6px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
+  .md pre{background:var(--code-bg);padding:12px;border-radius:10px;overflow-x:auto;border:1px solid var(--border)}
+  .md pre code{background:none;padding:0}
+  .md a{color:var(--accent-2);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--accent-2) 40%,transparent)}
+  .md hr{border:none;border-top:1px solid var(--border);margin:20px 0}
+  .md table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px;display:block;overflow-x:auto}
+  .md th,.md td{border:1px solid var(--border);padding:8px 10px;text-align:left;vertical-align:top}
+  .md th{background:var(--panel-2);font-weight:700}
+  .md tr:nth-child(even) td{background:color-mix(in srgb,var(--panel-2) 50%,transparent)}
+  .alert{padding:11px 13px;border-radius:10px;font-size:13px;margin-top:12px;display:none}
+  .alert.show{display:block}
+  .alert.err{background:color-mix(in srgb,var(--danger) 14%,transparent);color:var(--danger);border:1px solid color-mix(in srgb,var(--danger) 35%,transparent)}
+  .keyrow{display:flex;gap:8px}
+  .keyrow input{flex:1}
+  .toggle-key{flex:0 0 auto;background:var(--panel-2);color:var(--text);border:1px solid var(--border);padding:0 12px}
+  .toggle-key:hover{background:var(--border)}
+  .foot{text-align:center;font-size:11px;color:var(--muted);margin-top:6px}
+  .caret{margin-left:auto;font-size:11px}
+  .disclaimer{font-size:11px;color:var(--muted);margin-top:10px;line-height:1.5}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <rect width="48" height="48" rx="11" fill="#2563eb"/>
+      <path d="M24 11c-5.5 0-10 4.4-10 9.9 0 7 10 16.1 10 16.1s10-9.1 10-16.1C34 15.4 29.5 11 24 11z" fill="#fff"/>
+      <circle cx="24" cy="20.6" r="4.1" fill="#2563eb"/>
+    </svg>
+    <div>
+      <h1>人流アノマリー要因分析</h1>
+      <p>日時・緯度経度から原因をWeb横断で深掘り</p>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- 設定 -->
+  <div class="card">
+    <details class="settings" id="settings">
+      <summary>API設定 <span class="caret" id="keyState"></span></summary>
+      <div style="margin-top:14px">
+        <div class="field">
+          <label for="apiKey">Anthropic APIキー <span class="hint">（端末内にのみ保存されます）</span></label>
+          <div class="keyrow">
+            <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+            <button class="toggle-key" id="toggleKey" type="button">表示</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="model">モデル</label>
+          <select id="model">
+            <option value="claude-opus-4-8">Claude Opus 4.8（推奨・高精度）</option>
+            <option value="claude-sonnet-5">Claude Sonnet 5（高速・低コスト）</option>
+          </select>
+        </div>
+        <div class="disclaimer">
+          APIキーは <code>console.anthropic.com</code> で取得できます。キーはこのブラウザの端末内ストレージにのみ保存され、外部サーバーには送信されません（Claude API へのリクエストのみに使用します）。
+        </div>
+      </div>
+    </details>
+  </div>
+
+  <!-- 入力 -->
+  <div class="card">
+    <h2>観測情報の入力</h2>
+    <div class="field">
+      <label for="datetime">日時</label>
+      <input id="datetime" type="datetime-local" />
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="lat">緯度 (Latitude)</label>
+        <input id="lat" type="number" inputmode="decimal" step="any" placeholder="35.681236" />
+      </div>
+      <div class="field">
+        <label for="lon">経度 (Longitude)</label>
+        <input id="lon" type="number" inputmode="decimal" step="any" placeholder="139.767125" />
+      </div>
+    </div>
+    <div class="field">
+      <button class="secondary" id="geoBtn" type="button" style="width:100%">📍 現在地を取得</button>
+    </div>
+    <div class="field">
+      <label for="anomaly">観測されたアノマリーの状況 <span class="hint">（任意）</span></label>
+      <textarea id="anomaly" placeholder="例：通常の3倍の人流を検知。滞在時間も増加。"></textarea>
+    </div>
+    <div class="field">
+      <label for="facilities">周辺施設情報 <span class="hint">（任意・参考情報）</span></label>
+      <textarea id="facilities" placeholder="例：東京ドーム、商業施設、地下鉄駅など"></textarea>
+    </div>
+    <div class="field">
+      <label for="terrain">周辺地形情報 <span class="hint">（任意・参考情報）</span></label>
+      <textarea id="terrain" placeholder="例：河川敷、丘陵地、海岸沿いなど"></textarea>
+    </div>
+    <button class="run" id="runBtn" type="button">レポートを生成</button>
+    <div class="alert err" id="alert"></div>
+  </div>
+
+  <!-- 進捗 -->
+  <div class="card status" id="statusCard">
+    <div class="statusbar">
+      <div class="spinner"></div>
+      <span id="statusText">調査を開始しています…</span>
+      <button class="secondary" id="stopBtn" type="button" style="flex:0 0 auto;padding:6px 12px;font-size:12px">中止</button>
+    </div>
+    <div class="log" id="log"></div>
+  </div>
+
+  <!-- レポート -->
+  <div class="card report" id="reportCard">
+    <div class="report-actions">
+      <button class="secondary" id="copyBtn" type="button">📋 コピー</button>
+      <button class="secondary" id="dlBtn" type="button">⬇ .md 保存</button>
+    </div>
+    <div class="md" id="report"></div>
+  </div>
+
+  <p class="foot">Powered by Claude (Anthropic) ・ Web検索による調査結果には推定が含まれます</p>
+</main>
+
+<script>
+/* ============================================================
+   人流アノマリー要因分析 PWA
+   - 端末内APIキーでClaude Messages APIを直接呼び出し（ストリーミング）
+   - web_search / web_fetch サーバーツールを使用
+   ============================================================ */
+
+const $ = (id) => document.getElementById(id);
+const LS_KEY = 'ggai_report_settings_v1';
+
+/* ---------- システムプロンプト（アナリストの人格・スタンス） ---------- */
+const SYSTEM_PROMPT = `あなたは要因を徹底的に深掘りするデータサイエンティスト兼、位置情報に詳しいアナリストです。
+以下の指示に従い、レポートを作成してください。
+
+「ある日時」に、「ある経度緯度」付近で顕著な人流のアノマリー（異常な増加）が観測されました。関連する最新ニュース、事象、災害予報、SNS情報なども検索し、人流増加の原因を分析し、Markdown形式でレポートを作成してください。参考情報として、周辺施設や周辺地形情報なども提供します。
+
+違和感や注目点があれば必ず「どこで（Where）」「なぜ（Why）」を深掘りし、具体的な要因まで踏み込んでください。深掘りには、与えられたデータとWeb調査を用います。調査前の確認は不要で、すぐに調査を始めてください。
+
+## 重要な価値観・スタンス
+- データに含まれていない要素（イベント・天候・交通・メディア露出など）はWeb情報で補完する。
+- 「データで確かに言える事実」と「Web情報からの推定」を明確に区別して記載する。
+- 「事実」と「推定（仮説）」を分けて書く。
+- レポート読者が落胆しないように、前向きな示唆を含めること。商業的にマイナスな形では書かないこと（全てが前向きである必要はありません）。
+
+## レポートの推奨構成（Markdown）
+1. # サマリー（要点・最有力の要因）
+2. ## 観測データ（与えられた事実）
+3. ## 周辺環境の分析（Where — 施設・地形・アクセス）
+4. ## 要因の深掘り（Why — Web調査に基づく候補要因、事実と推定を区別）
+5. ## 有力仮説と根拠（確度つき）
+6. ## 前向きな示唆・活用アイデア
+7. ## 参考にした情報源（URL）
+
+日本語で、読みやすく具体的に記述してください。`;
+
+/* ---------- 設定の保存/読込 ---------- */
+function loadSettings(){
+  try{
+    const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
+    if(s.apiKey) $('apiKey').value = s.apiKey;
+    if(s.model) $('model').value = s.model;
+  }catch(e){}
+  updateKeyState();
+}
+function saveSettings(){
+  localStorage.setItem(LS_KEY, JSON.stringify({apiKey:$('apiKey').value.trim(), model:$('model').value}));
+  updateKeyState();
+}
+function updateKeyState(){
+  const has = !!$('apiKey').value.trim();
+  $('keyState').textContent = has ? '設定済み ✓' : '未設定';
+  $('keyState').style.color = has ? 'var(--ok)' : 'var(--warn)';
+}
+
+/* ---------- 初期化 ---------- */
+function init(){
+  loadSettings();
+  // 日時のデフォルト：現在時刻
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  $('datetime').value = now.toISOString().slice(0,16);
+
+  $('apiKey').addEventListener('input', saveSettings);
+  $('model').addEventListener('change', saveSettings);
+  if(!$('apiKey').value.trim()) $('settings').open = true;
+
+  $('toggleKey').addEventListener('click', ()=>{
+    const el = $('apiKey');
+    el.type = el.type === 'password' ? 'text' : 'password';
+    $('toggleKey').textContent = el.type === 'password' ? '表示' : '隠す';
+  });
+  $('geoBtn').addEventListener('click', geolocate);
+  $('runBtn').addEventListener('click', run);
+  $('stopBtn').addEventListener('click', ()=>{ if(controller) controller.abort(); });
+  $('copyBtn').addEventListener('click', copyReport);
+  $('dlBtn').addEventListener('click', downloadReport);
+}
+
+/* ---------- 現在地取得 ---------- */
+function geolocate(){
+  if(!navigator.geolocation){ showError('この端末では位置情報を取得できません。'); return; }
+  const btn = $('geoBtn'); const orig = btn.textContent;
+  btn.textContent = '📍 取得中…'; btn.disabled = true;
+  navigator.geolocation.getCurrentPosition(
+    (pos)=>{
+      $('lat').value = pos.coords.latitude.toFixed(6);
+      $('lon').value = pos.coords.longitude.toFixed(6);
+      btn.textContent = orig; btn.disabled = false;
+    },
+    (err)=>{
+      showError('位置情報の取得に失敗しました：' + err.message);
+      btn.textContent = orig; btn.disabled = false;
+    },
+    {enableHighAccuracy:true, timeout:10000}
+  );
+}
+
+/* ---------- UI ヘルパ ---------- */
+function showError(msg){ const a=$('alert'); a.textContent=msg; a.classList.add('show'); }
+function clearError(){ $('alert').classList.remove('show'); }
+function logLine(text, isTool){
+  const d=document.createElement('div');
+  if(isTool) d.className='tool';
+  d.textContent=text;
+  $('log').appendChild(d);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+
+/* ---------- 実行 ---------- */
+let controller = null;
+let rawReport = '';
+
+async function run(){
+  clearError();
+  const apiKey = $('apiKey').value.trim();
+  const lat = $('lat').value.trim();
+  const lon = $('lon').value.trim();
+  const datetime = $('datetime').value;
+
+  if(!apiKey){ showError('APIキーを設定してください（上部の「API設定」）。'); $('settings').open=true; return; }
+  if(!lat || !lon){ showError('緯度・経度を入力してください。'); return; }
+  if(!datetime){ showError('日時を入力してください。'); return; }
+
+  // UIリセット
+  $('runBtn').disabled = true;
+  $('statusCard').classList.add('active');
+  $('reportCard').classList.remove('active');
+  $('log').innerHTML=''; $('report').innerHTML=''; rawReport='';
+  $('statusText').textContent = '調査を開始しています…';
+  logLine('観測地点: ' + lat + ', ' + lon + ' / 日時: ' + datetime.replace('T',' '));
+
+  const userMsg = buildUserMessage({datetime, lat, lon,
+    anomaly:$('anomaly').value.trim(), facilities:$('facilities').value.trim(), terrain:$('terrain').value.trim()});
+
+  controller = new AbortController();
+  try{
+    await callClaude(apiKey, $('model').value, userMsg);
+    $('statusText').textContent = '完了しました。';
+    $('statusCard').classList.remove('active');
+  }catch(err){
+    if(err.name === 'AbortError'){
+      logLine('（中止しました）');
+      $('statusCard').classList.remove('active');
+    }else{
+      showError('エラー：' + (err.message || err));
+      $('statusCard').classList.remove('active');
+    }
+  }finally{
+    $('runBtn').disabled = false;
+    controller = null;
+  }
+}
+
+function buildUserMessage(p){
+  const jp = (v, dflt) => v ? v : dflt;
+  return [
+    '以下の観測情報について、人流アノマリー（異常な増加）の原因を分析し、Markdown形式でレポートを作成してください。',
+    '',
+    '## 観測情報',
+    '- 日時: ' + p.datetime.replace('T',' '),
+    '- 緯度: ' + p.lat,
+    '- 経度: ' + p.lon,
+    '- 地図（確認用）: https://www.google.com/maps?q=' + p.lat + ',' + p.lon,
+    '',
+    '## 観測されたアノマリーの状況',
+    jp(p.anomaly, '当該地点・時間帯において、付近で顕著な人流の増加が観測された。'),
+    '',
+    '## 参考情報（周辺施設）',
+    jp(p.facilities, '（特に指定なし。必要に応じてWeb検索で周辺施設を確認してください。）'),
+    '',
+    '## 参考情報（周辺地形）',
+    jp(p.terrain, '（特に指定なし。必要に応じてWeb検索・地図で地形を確認してください。）'),
+    '',
+    'この地点・日時の周辺で開催されたイベント、最新ニュース、災害・気象情報、交通、SNSでの話題などをWeb検索で調べ、人流増加の要因を「事実」と「推定」を分けて分析してください。参照した情報源のURLも明記してください。'
+  ].join('\n');
+}
+
+/* ---------- Claude API 呼び出し（ストリーミング + pause_turn対応） ---------- */
+async function callClaude(apiKey, model, userText){
+  const messages = [{role:'user', content:userText}];
+  let searchCount = 0, fetchCount = 0, guard = 0;
+
+  while(true){
+    const body = {
+      model,
+      max_tokens: 32000,
+      stream: true,
+      thinking: {type:'adaptive', display:'summarized'},
+      output_config: {effort:'high'},
+      system: SYSTEM_PROMPT,
+      tools: [
+        {type:'web_search_20260209', name:'web_search', max_uses:12},
+        {type:'web_fetch_20260209', name:'web_fetch', max_uses:8}
+      ],
+      messages
+    };
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{
+        'content-type':'application/json',
+        'x-api-key':apiKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    if(!resp.ok){
+      let detail = 'HTTP ' + resp.status;
+      try{ const j = await resp.json(); if(j.error && j.error.message) detail = j.error.message; }catch(e){}
+      if(resp.status===401) detail = 'APIキーが無効です。設定を確認してください。';
+      if(resp.status===429) detail = 'レート制限に達しました。少し待って再実行してください。';
+      throw new Error(detail);
+    }
+
+    const result = await parseStream(resp, {
+      onText: (t)=>{ rawReport += t; scheduleRender(); },
+      onToolStart: (name, blk)=>{
+        if(name==='web_search'){ searchCount++; $('statusText').textContent='Web検索中… (' + searchCount + '件目)'; }
+        else if(name==='web_fetch'){ fetchCount++; $('statusText').textContent='ページ取得中…'; }
+      },
+      onToolInput: (name, input)=>{
+        if(name==='web_search' && input && input.query) logLine('🔍 検索: ' + input.query, true);
+        else if(name==='web_fetch' && input && input.url) logLine('🌐 取得: ' + input.url, true);
+      },
+      onSearchResult: (n)=>{ logLine('　→ ' + n + '件の結果を取得'); },
+      onThinking: (t)=>{ /* 思考の要約はログに出しすぎない */ },
+      onTextStart: ()=>{ $('statusText').textContent='レポートを作成中…'; showReportArea(); }
+    });
+
+    if(result.stopReason === 'pause_turn'){
+      messages.push({role:'assistant', content: result.content});
+      guard++;
+      if(guard > 12) break;
+      logLine('（調査継続中…）');
+      continue;
+    }
+    break;
+  }
+  renderNow();
+}
+
+/* ---------- SSE ストリーム解析 ---------- */
+async function parseStream(resp, cb){
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  const blocks = {};        // index -> content block (再送用に復元)
+  const partialJson = {};   // index -> 途中のJSON文字列（tool input）
+  let stopReason = null;
+  let textStarted = false;
+
+  while(true){
+    const {value, done} = await reader.read();
+    if(done) break;
+    buf += dec.decode(value, {stream:true});
+    let nl;
+    while((nl = buf.indexOf('\n')) >= 0){
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl+1);
+      if(!line || !line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if(data === '[DONE]') continue;
+      let ev;
+      try{ ev = JSON.parse(data); }catch(e){ continue; }
+
+      if(ev.type === 'content_block_start'){
+        const i = ev.index; const b = ev.content_block;
+        blocks[i] = JSON.parse(JSON.stringify(b));
+        partialJson[i] = '';
+        if(b.type === 'text'){ if(!textStarted){ textStarted=true; cb.onTextStart(); } }
+        else if(b.type === 'server_tool_use'){ cb.onToolStart(b.name, b); }
+        else if(b.type === 'web_search_tool_result'){
+          const n = Array.isArray(b.content) ? b.content.length : 0;
+          cb.onSearchResult(n);
+        }
+      }
+      else if(ev.type === 'content_block_delta'){
+        const i = ev.index; const d = ev.delta;
+        if(d.type === 'text_delta'){
+          if(!textStarted){ textStarted=true; cb.onTextStart(); }
+          if(blocks[i]) blocks[i].text = (blocks[i].text||'') + d.text;
+          cb.onText(d.text);
+        }
+        else if(d.type === 'thinking_delta'){
+          if(blocks[i]) blocks[i].thinking = (blocks[i].thinking||'') + d.thinking;
+          cb.onThinking(d.thinking);
+        }
+        else if(d.type === 'signature_delta'){
+          if(blocks[i]) blocks[i].signature = (blocks[i].signature||'') + d.signature;
+        }
+        else if(d.type === 'input_json_delta'){
+          partialJson[i] = (partialJson[i]||'') + d.partial_json;
+        }
+      }
+      else if(ev.type === 'content_block_stop'){
+        const i = ev.index; const b = blocks[i];
+        if(b && b.type === 'server_tool_use'){
+          try{ b.input = partialJson[i] ? JSON.parse(partialJson[i]) : {}; }catch(e){ b.input = {}; }
+          cb.onToolInput(b.name, b.input);
+        }
+      }
+      else if(ev.type === 'message_delta'){
+        if(ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason;
+      }
+      else if(ev.type === 'error'){
+        throw new Error((ev.error && ev.error.message) || 'ストリームエラー');
+      }
+    }
+  }
+
+  // 復元したブロックを順序どおりに配列化（pause_turn再送用）
+  const content = Object.keys(blocks).sort((a,b)=>a-b).map(k=>blocks[k]);
+  return {stopReason, content};
+}
+
+/* ---------- レポート表示（スロットリング） ---------- */
+let renderTimer = null;
+function showReportArea(){ $('reportCard').classList.add('active'); }
+function scheduleRender(){
+  if(renderTimer) return;
+  renderTimer = setTimeout(()=>{ renderTimer=null; renderNow(); }, 120);
+}
+function renderNow(){
+  if(!$('reportCard').classList.contains('active')) showReportArea();
+  $('report').innerHTML = renderMarkdown(rawReport);
+}
+
+/* ---------- コピー / ダウンロード ---------- */
+async function copyReport(){
+  try{ await navigator.clipboard.writeText(rawReport); $('copyBtn').textContent='✓ コピー済'; setTimeout(()=>$('copyBtn').textContent='📋 コピー',1500); }
+  catch(e){ showError('コピーに失敗しました。'); }
+}
+function downloadReport(){
+  const blob = new Blob([rawReport], {type:'text/markdown;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const stamp = ($('datetime').value || '').replace(/[:T]/g,'-') || 'report';
+  a.href=url; a.download='人流アノマリー分析_'+stamp+'.md';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+/* ============================================================
+   最小Markdownレンダラ（外部依存なし・オフライン動作）
+   ============================================================ */
+function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function inlineMd(s){
+  s = escapeHtml(s);
+  s = s.replace(/`([^`]+)`/g, (m,c)=>'<code>'+c+'</code>');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, '$1<em>$2</em>');
+  s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)/g, (m,pre,url)=>pre+'<a href="'+url+'" target="_blank" rel="noopener">'+url+'</a>');
+  return s;
+}
+function renderMarkdown(md){
+  const lines = md.replace(/\r\n/g,'\n').split('\n');
+  let html = '', i = 0;
+  const n = lines.length;
+  function isTableSep(l){ return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(l); }
+  while(i < n){
+    let line = lines[i];
+
+    // コードブロック
+    if(/^\s*```/.test(line)){
+      let code=''; i++;
+      while(i<n && !/^\s*```/.test(lines[i])){ code += lines[i] + '\n'; i++; }
+      i++;
+      html += '<pre><code>' + escapeHtml(code.replace(/\n$/,'')) + '</code></pre>';
+      continue;
+    }
+    // 見出し
+    let h = line.match(/^(#{1,6})\s+(.*)$/);
+    if(h){ const lv=h[1].length; html += '<h'+lv+'>'+inlineMd(h[2].trim())+'</h'+lv+'>'; i++; continue; }
+    // 水平線
+    if(/^\s*(---|\*\*\*|___)\s*$/.test(line)){ html += '<hr>'; i++; continue; }
+    // 引用
+    if(/^\s*>\s?/.test(line)){
+      let q=''; while(i<n && /^\s*>\s?/.test(lines[i])){ q += lines[i].replace(/^\s*>\s?/,'') + '\n'; i++; }
+      html += '<blockquote>' + renderMarkdown(q) + '</blockquote>'; continue;
+    }
+    // テーブル
+    if(line.indexOf('|')>=0 && i+1<n && isTableSep(lines[i+1])){
+      const parseRow = (l)=> l.replace(/^\s*\|/,'').replace(/\|\s*$/,'').split('|').map(c=>c.trim());
+      const headers = parseRow(line);
+      i += 2;
+      let rows=[];
+      while(i<n && lines[i].indexOf('|')>=0 && lines[i].trim()!==''){ rows.push(parseRow(lines[i])); i++; }
+      let t='<table><thead><tr>'+headers.map(c=>'<th>'+inlineMd(c)+'</th>').join('')+'</tr></thead><tbody>';
+      for(const r of rows){ t+='<tr>'+headers.map((_,ci)=>'<td>'+inlineMd(r[ci]||'')+'</td>').join('')+'</tr>'; }
+      t+='</tbody></table>'; html += t; continue;
+    }
+    // リスト（順序なし/順序あり）
+    if(/^\s*([-*+]|\d+\.)\s+/.test(line)){
+      const ordered = /^\s*\d+\.\s+/.test(line);
+      const tag = ordered ? 'ol' : 'ul';
+      let items=[];
+      while(i<n && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])){
+        items.push(lines[i].replace(/^\s*([-*+]|\d+\.)\s+/,'')); i++;
+      }
+      html += '<'+tag+'>' + items.map(it=>'<li>'+inlineMd(it)+'</li>').join('') + '</'+tag+'>';
+      continue;
+    }
+    // 空行
+    if(line.trim()===''){ i++; continue; }
+    // 段落（連続行をまとめる）
+    let para = line; i++;
+    while(i<n && lines[i].trim()!=='' && !/^(#{1,6}\s|\s*```|\s*>|\s*([-*+]|\d+\.)\s)/.test(lines[i]) && !(lines[i].indexOf('|')>=0 && i+1<n && isTableSep(lines[i+1]))){
+      para += '\n' + lines[i]; i++;
+    }
+    html += '<p>'+inlineMd(para).replace(/\n/g,'<br>')+'</p>';
+  }
+  return html;
+}
+
+/* ---------- Service Worker 登録（PWA） ---------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{ navigator.serviceWorker.register('sw.js').catch(()=>{}); });
+}
+
+init();
+</script>
+</body>
+</html>
