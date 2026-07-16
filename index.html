@@ -138,21 +138,25 @@
       <summary>API設定 <span class="caret" id="keyState"></span></summary>
       <div style="margin-top:14px">
         <div class="field">
-          <label for="apiKey">Anthropic APIキー <span class="hint">（端末内にのみ保存されます）</span></label>
+          <label for="apiKey">OpenAI APIキー <span class="hint">（端末内にのみ保存されます）</span></label>
           <div class="keyrow">
-            <input id="apiKey" type="password" placeholder="sk-ant-..." autocomplete="off" spellcheck="false" />
+            <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
             <button class="toggle-key" id="toggleKey" type="button">表示</button>
           </div>
         </div>
         <div class="field">
-          <label for="model">モデル</label>
-          <select id="model">
-            <option value="claude-opus-4-8">Claude Opus 4.8（推奨・高精度）</option>
-            <option value="claude-sonnet-5">Claude Sonnet 5（高速・低コスト）</option>
-          </select>
+          <label for="model">モデル <span class="hint">（Web検索対応モデルを指定）</span></label>
+          <input id="model" list="modelList" placeholder="gpt-5.6" autocomplete="off" spellcheck="false" />
+          <datalist id="modelList">
+            <option value="gpt-5.6"></option>
+            <option value="gpt-5.5"></option>
+            <option value="gpt-5.4"></option>
+            <option value="gpt-4.1"></option>
+            <option value="gpt-4o"></option>
+          </datalist>
         </div>
         <div class="disclaimer">
-          APIキーは <code>console.anthropic.com</code> で取得できます。キーはこのブラウザの端末内ストレージにのみ保存され、外部サーバーには送信されません（Claude API へのリクエストのみに使用します）。
+          APIキーは <code>platform.openai.com/api-keys</code> で取得できます。キーはこのブラウザの端末内ストレージにのみ保存され、外部サーバーには送信されません（OpenAI API へのリクエストのみに使用します）。モデル名は、お使いのアカウントで利用可能な<strong>Web検索対応モデル</strong>に変更してください。
         </div>
       </div>
     </details>
@@ -213,18 +217,19 @@
     <div class="md" id="report"></div>
   </div>
 
-  <p class="foot">Powered by Claude (Anthropic) ・ Web検索による調査結果には推定が含まれます</p>
+  <p class="foot">Powered by OpenAI ・ Web検索による調査結果には推定が含まれます</p>
 </main>
 
 <script>
 /* ============================================================
    人流アノマリー要因分析 PWA
-   - 端末内APIキーでClaude Messages APIを直接呼び出し（ストリーミング）
+   - 端末内APIキーでOpenAI Responses APIを直接呼び出し（ストリーミング）
    - web_search / web_fetch サーバーツールを使用
    ============================================================ */
 
 const $ = (id) => document.getElementById(id);
-const LS_KEY = 'ggai_report_settings_v1';
+const LS_KEY = 'ggai_report_settings_v2';
+const DEFAULT_MODEL = 'gpt-5.6';
 
 /* ---------- システムプロンプト（アナリストの人格・スタンス） ---------- */
 const SYSTEM_PROMPT = `あなたは要因を徹底的に深掘りするデータサイエンティスト兼、位置情報に詳しいアナリストです。
@@ -258,6 +263,7 @@ function loadSettings(){
     if(s.apiKey) $('apiKey').value = s.apiKey;
     if(s.model) $('model').value = s.model;
   }catch(e){}
+  if(!$('model').value) $('model').value = DEFAULT_MODEL;
   updateKeyState();
 }
 function saveSettings(){
@@ -352,7 +358,7 @@ async function run(){
 
   controller = new AbortController();
   try{
-    await callClaude(apiKey, $('model').value, userMsg);
+    await callOpenAI(apiKey, $('model').value.trim() || DEFAULT_MODEL, userMsg);
     $('statusText').textContent = '完了しました。';
     $('statusCard').classList.remove('active');
   }catch(err){
@@ -393,82 +399,74 @@ function buildUserMessage(p){
   ].join('\n');
 }
 
-/* ---------- Claude API 呼び出し（ストリーミング + pause_turn対応） ---------- */
-async function callClaude(apiKey, model, userText){
-  const messages = [{role:'user', content:userText}];
-  let searchCount = 0, fetchCount = 0, guard = 0;
+/* ---------- OpenAI Responses API 呼び出し（ストリーミング / Web検索） ---------- */
+async function callOpenAI(apiKey, model, userText){
+  let searchCount = 0, textStarted = false;
+  const seenSearch = {};
 
-  while(true){
-    const body = {
-      model,
-      max_tokens: 32000,
-      stream: true,
-      thinking: {type:'adaptive', display:'summarized'},
-      output_config: {effort:'high'},
-      system: SYSTEM_PROMPT,
-      tools: [
-        {type:'web_search_20260209', name:'web_search', max_uses:12},
-        {type:'web_fetch_20260209', name:'web_fetch', max_uses:8}
-      ],
-      messages
-    };
+  const body = {
+    model: model,
+    instructions: SYSTEM_PROMPT,
+    input: userText,
+    tools: [{type:'web_search'}],
+    stream: true,
+    store: false
+  };
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  let resp;
+  try{
+    resp = await fetch('https://api.openai.com/v1/responses', {
       method:'POST',
       headers:{
         'content-type':'application/json',
-        'x-api-key':apiKey,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
+        'authorization':'Bearer ' + apiKey
       },
       body: JSON.stringify(body),
       signal: controller.signal
     });
-
-    if(!resp.ok){
-      let detail = 'HTTP ' + resp.status;
-      try{ const j = await resp.json(); if(j.error && j.error.message) detail = j.error.message; }catch(e){}
-      if(resp.status===401) detail = 'APIキーが無効です。設定を確認してください。';
-      if(resp.status===429) detail = 'レート制限に達しました。少し待って再実行してください。';
-      throw new Error(detail);
-    }
-
-    const result = await parseStream(resp, {
-      onText: (t)=>{ rawReport += t; scheduleRender(); },
-      onToolStart: (name, blk)=>{
-        if(name==='web_search'){ searchCount++; $('statusText').textContent='Web検索中… (' + searchCount + '件目)'; }
-        else if(name==='web_fetch'){ fetchCount++; $('statusText').textContent='ページ取得中…'; }
-      },
-      onToolInput: (name, input)=>{
-        if(name==='web_search' && input && input.query) logLine('🔍 検索: ' + input.query, true);
-        else if(name==='web_fetch' && input && input.url) logLine('🌐 取得: ' + input.url, true);
-      },
-      onSearchResult: (n)=>{ logLine('　→ ' + n + '件の結果を取得'); },
-      onThinking: (t)=>{ /* 思考の要約はログに出しすぎない */ },
-      onTextStart: ()=>{ $('statusText').textContent='レポートを作成中…'; showReportArea(); }
-    });
-
-    if(result.stopReason === 'pause_turn'){
-      messages.push({role:'assistant', content: result.content});
-      guard++;
-      if(guard > 12) break;
-      logLine('（調査継続中…）');
-      continue;
-    }
-    break;
+  }catch(e){
+    if(e.name === 'AbortError') throw e;
+    throw new Error('OpenAIに接続できませんでした（ネットワークまたはCORS）。公開URLからのブラウザ直接呼び出しがブロックされている可能性があります。その場合はプロキシ経由が必要です。詳細: ' + (e.message || e));
   }
+
+  if(!resp.ok){
+    let detail = 'HTTP ' + resp.status;
+    try{ const j = await resp.json(); if(j.error && j.error.message) detail = j.error.message; }catch(e){}
+    if(resp.status===401) detail = 'APIキーが無効です。設定を確認してください。';
+    if(resp.status===404) detail = 'モデルが見つからないか利用できません（' + model + '）。利用可能なモデル名に変更してください。';
+    if(resp.status===429) detail = 'レート制限、または残高不足の可能性があります。少し待って再実行してください。';
+    throw new Error(detail);
+  }
+
+  await parseOpenAIStream(resp, {
+    onText: (t)=>{
+      if(!textStarted){ textStarted=true; $('statusText').textContent='レポートを作成中…'; showReportArea(); }
+      rawReport += t; scheduleRender();
+    },
+    onThinking: (t)=>{ /* 推論の要約はログに出しすぎない */ },
+    onSearch: (item)=>{
+      if(!item || !item.id || seenSearch[item.id]) return;
+      seenSearch[item.id] = true;
+      searchCount++;
+      $('statusText').textContent = 'Web検索中… (' + searchCount + '件目)';
+      const q = item.action && item.action.query;
+      logLine('🔍 検索' + (q ? ': ' + q : ''), true);
+    },
+    onSearchStatus: (type)=>{
+      if(type.endsWith('.searching') || type.endsWith('.in_progress'))
+        $('statusText').textContent = 'Web検索中… (' + Math.max(searchCount,1) + '件目)';
+    },
+    onAnnotation: (a)=>{ if(a && a.url) logLine('　→ 情報源: ' + (a.title || a.url)); }
+  });
+
   renderNow();
 }
 
-/* ---------- SSE ストリーム解析 ---------- */
-async function parseStream(resp, cb){
+/* ---------- SSE ストリーム解析（OpenAI Responses API のセマンティックイベント） ---------- */
+async function parseOpenAIStream(resp, cb){
   const reader = resp.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
-  const blocks = {};        // index -> content block (再送用に復元)
-  const partialJson = {};   // index -> 途中のJSON文字列（tool input）
-  let stopReason = null;
-  let textStarted = false;
 
   while(true){
     const {value, done} = await reader.read();
@@ -483,55 +481,36 @@ async function parseStream(resp, cb){
       if(data === '[DONE]') continue;
       let ev;
       try{ ev = JSON.parse(data); }catch(e){ continue; }
+      const t = ev.type || '';
 
-      if(ev.type === 'content_block_start'){
-        const i = ev.index; const b = ev.content_block;
-        blocks[i] = JSON.parse(JSON.stringify(b));
-        partialJson[i] = '';
-        if(b.type === 'text'){ if(!textStarted){ textStarted=true; cb.onTextStart(); } }
-        else if(b.type === 'server_tool_use'){ cb.onToolStart(b.name, b); }
-        else if(b.type === 'web_search_tool_result'){
-          const n = Array.isArray(b.content) ? b.content.length : 0;
-          cb.onSearchResult(n);
-        }
+      if(t === 'response.output_text.delta'){
+        cb.onText(ev.delta || '');
       }
-      else if(ev.type === 'content_block_delta'){
-        const i = ev.index; const d = ev.delta;
-        if(d.type === 'text_delta'){
-          if(!textStarted){ textStarted=true; cb.onTextStart(); }
-          if(blocks[i]) blocks[i].text = (blocks[i].text||'') + d.text;
-          cb.onText(d.text);
-        }
-        else if(d.type === 'thinking_delta'){
-          if(blocks[i]) blocks[i].thinking = (blocks[i].thinking||'') + d.thinking;
-          cb.onThinking(d.thinking);
-        }
-        else if(d.type === 'signature_delta'){
-          if(blocks[i]) blocks[i].signature = (blocks[i].signature||'') + d.signature;
-        }
-        else if(d.type === 'input_json_delta'){
-          partialJson[i] = (partialJson[i]||'') + d.partial_json;
-        }
+      else if(t === 'response.reasoning_summary_text.delta'){
+        cb.onThinking(ev.delta || '');
       }
-      else if(ev.type === 'content_block_stop'){
-        const i = ev.index; const b = blocks[i];
-        if(b && b.type === 'server_tool_use'){
-          try{ b.input = partialJson[i] ? JSON.parse(partialJson[i]) : {}; }catch(e){ b.input = {}; }
-          cb.onToolInput(b.name, b.input);
-        }
+      else if(t === 'response.output_item.added' || t === 'response.output_item.done'){
+        if(ev.item && ev.item.type === 'web_search_call') cb.onSearch(ev.item);
       }
-      else if(ev.type === 'message_delta'){
-        if(ev.delta && ev.delta.stop_reason) stopReason = ev.delta.stop_reason;
+      else if(t.indexOf('response.web_search_call.') === 0){
+        cb.onSearchStatus(t);
       }
-      else if(ev.type === 'error'){
-        throw new Error((ev.error && ev.error.message) || 'ストリームエラー');
+      else if(t === 'response.output_text.annotation.added'){
+        cb.onAnnotation(ev.annotation);
+      }
+      else if(t === 'response.failed'){
+        const err = ev.response && ev.response.error;
+        throw new Error((err && err.message) || 'レスポンス生成に失敗しました。');
+      }
+      else if(t === 'response.incomplete'){
+        const d = ev.response && ev.response.incomplete_details;
+        logLine('（レポートが途中で終了しました' + (d && d.reason ? '：' + d.reason : '') + '）');
+      }
+      else if(t === 'error'){
+        throw new Error(ev.message || (ev.error && ev.error.message) || 'ストリームエラー');
       }
     }
   }
-
-  // 復元したブロックを順序どおりに配列化（pause_turn再送用）
-  const content = Object.keys(blocks).sort((a,b)=>a-b).map(k=>blocks[k]);
-  return {stopReason, content};
 }
 
 /* ---------- レポート表示（スロットリング） ---------- */

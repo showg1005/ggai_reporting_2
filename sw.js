@@ -1,6 +1,6 @@
 /* Service Worker: アプリシェルをキャッシュしてオフライン起動を可能にする。
-   API通信（api.anthropic.com）はキャッシュせず常にネットワークへ。 */
-const CACHE = 'ggai-report-v1';
+   API通信（api.openai.com）はキャッシュせず常にネットワークへ。 */
+const CACHE = 'ggai-report-v2';
 const ASSETS = [
   './',
   './index.html',
