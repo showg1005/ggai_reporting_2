@@ -70,6 +70,10 @@
   button.secondary:hover{background:var(--border)}
   .btn-row{display:flex;gap:10px;flex-wrap:wrap}
   .btn-row button{flex:1;min-width:130px}
+  .segmented{display:flex;gap:0;border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--panel-2)}
+  .segmented .seg{flex:1;background:transparent;color:var(--muted);border:none;border-radius:0;padding:11px 12px;font-weight:600}
+  .segmented .seg:hover{background:color-mix(in srgb,var(--accent) 10%,transparent)}
+  .segmented .seg.active{background:var(--accent);color:#fff}
   .run{width:100%;padding:15px;font-size:16px;margin-top:4px}
   details.settings summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--muted);list-style:none;display:flex;align-items:center;gap:6px}
   details.settings summary::-webkit-details-marker{display:none}
@@ -169,18 +173,39 @@
       <label for="datetime">日時</label>
       <input id="datetime" type="datetime-local" />
     </div>
-    <div class="row">
-      <div class="field">
-        <label for="lat">緯度 (Latitude)</label>
-        <input id="lat" type="number" inputmode="decimal" step="any" placeholder="35.681236" />
-      </div>
-      <div class="field">
-        <label for="lon">経度 (Longitude)</label>
-        <input id="lon" type="number" inputmode="decimal" step="any" placeholder="139.767125" />
+
+    <div class="field">
+      <label>位置の指定方法</label>
+      <div class="segmented" role="tablist">
+        <button type="button" id="modeCoord" class="seg active" role="tab">緯度・経度</button>
+        <button type="button" id="modeAddr" class="seg" role="tab">住所・地名</button>
       </div>
     </div>
-    <div class="field">
-      <button class="secondary" id="geoBtn" type="button" style="width:100%">📍 現在地を取得</button>
+
+    <!-- 緯度経度モード -->
+    <div id="coordMode">
+      <div class="row">
+        <div class="field">
+          <label for="lat">緯度 (Latitude)</label>
+          <input id="lat" type="number" inputmode="decimal" step="any" placeholder="35.681236" />
+        </div>
+        <div class="field">
+          <label for="lon">経度 (Longitude)</label>
+          <input id="lon" type="number" inputmode="decimal" step="any" placeholder="139.767125" />
+        </div>
+      </div>
+      <div class="field">
+        <button class="secondary" id="geoBtn" type="button" style="width:100%">📍 現在地を取得</button>
+      </div>
+    </div>
+
+    <!-- 住所・地名モード -->
+    <div id="addrMode" style="display:none">
+      <div class="field">
+        <label for="address">住所・地名</label>
+        <input id="address" type="text" placeholder="例：東京都渋谷区 スクランブル交差点 / 東京ドーム" autocomplete="off" />
+        <div class="hint" style="margin-top:6px">住所・施設名・ランドマーク等を入力できます。地点はWeb検索で特定して分析します。</div>
+      </div>
     </div>
     <div class="field">
       <label for="anomaly">観測されたアノマリーの状況 <span class="hint">（任意）</span></label>
@@ -230,6 +255,7 @@
 const $ = (id) => document.getElementById(id);
 const LS_KEY = 'ggai_report_settings_v2';
 const DEFAULT_MODEL = 'gpt-5.6';
+let locMode = 'coord'; // 'coord' | 'addr'
 
 /* ---------- システムプロンプト（アナリストの人格・スタンス） ---------- */
 const SYSTEM_PROMPT = `あなたは要因を徹底的に深掘りするデータサイエンティスト兼、位置情報に詳しいアナリストです。
@@ -262,12 +288,14 @@ function loadSettings(){
     const s = JSON.parse(localStorage.getItem(LS_KEY) || '{}');
     if(s.apiKey) $('apiKey').value = s.apiKey;
     if(s.model) $('model').value = s.model;
+    if(s.mode) locMode = s.mode;
   }catch(e){}
   if(!$('model').value) $('model').value = DEFAULT_MODEL;
+  applyMode();
   updateKeyState();
 }
 function saveSettings(){
-  localStorage.setItem(LS_KEY, JSON.stringify({apiKey:$('apiKey').value.trim(), model:$('model').value}));
+  localStorage.setItem(LS_KEY, JSON.stringify({apiKey:$('apiKey').value.trim(), model:$('model').value, mode:locMode}));
   updateKeyState();
 }
 function updateKeyState(){
@@ -275,6 +303,16 @@ function updateKeyState(){
   $('keyState').textContent = has ? '設定済み ✓' : '未設定';
   $('keyState').style.color = has ? 'var(--ok)' : 'var(--warn)';
 }
+
+/* ---------- 位置指定モードの切替 ---------- */
+function applyMode(){
+  const coord = locMode === 'coord';
+  $('coordMode').style.display = coord ? '' : 'none';
+  $('addrMode').style.display = coord ? 'none' : '';
+  $('modeCoord').classList.toggle('active', coord);
+  $('modeAddr').classList.toggle('active', !coord);
+}
+function setMode(mode){ locMode = mode; applyMode(); saveSettings(); }
 
 /* ---------- 初期化 ---------- */
 function init(){
@@ -293,6 +331,8 @@ function init(){
     el.type = el.type === 'password' ? 'text' : 'password';
     $('toggleKey').textContent = el.type === 'password' ? '表示' : '隠す';
   });
+  $('modeCoord').addEventListener('click', ()=>setMode('coord'));
+  $('modeAddr').addEventListener('click', ()=>setMode('addr'));
   $('geoBtn').addEventListener('click', geolocate);
   $('runBtn').addEventListener('click', run);
   $('stopBtn').addEventListener('click', ()=>{ if(controller) controller.abort(); });
@@ -337,13 +377,22 @@ let rawReport = '';
 async function run(){
   clearError();
   const apiKey = $('apiKey').value.trim();
-  const lat = $('lat').value.trim();
-  const lon = $('lon').value.trim();
   const datetime = $('datetime').value;
 
   if(!apiKey){ showError('APIキーを設定してください（上部の「API設定」）。'); $('settings').open=true; return; }
-  if(!lat || !lon){ showError('緯度・経度を入力してください。'); return; }
   if(!datetime){ showError('日時を入力してください。'); return; }
+
+  // 位置（緯度経度 または 住所・地名）
+  let loc, locLabel;
+  if(locMode === 'coord'){
+    const lat = $('lat').value.trim(), lon = $('lon').value.trim();
+    if(!lat || !lon){ showError('緯度・経度を入力してください。'); return; }
+    loc = {mode:'coord', lat, lon}; locLabel = lat + ', ' + lon;
+  }else{
+    const address = $('address').value.trim();
+    if(!address){ showError('住所・地名を入力してください。'); return; }
+    loc = {mode:'addr', address}; locLabel = address;
+  }
 
   // UIリセット
   $('runBtn').disabled = true;
@@ -351,10 +400,10 @@ async function run(){
   $('reportCard').classList.remove('active');
   $('log').innerHTML=''; $('report').innerHTML=''; rawReport='';
   $('statusText').textContent = '調査を開始しています…';
-  logLine('観測地点: ' + lat + ', ' + lon + ' / 日時: ' + datetime.replace('T',' '));
+  logLine('観測地点: ' + locLabel + ' / 日時: ' + datetime.replace('T',' '));
 
-  const userMsg = buildUserMessage({datetime, lat, lon,
-    anomaly:$('anomaly').value.trim(), facilities:$('facilities').value.trim(), terrain:$('terrain').value.trim()});
+  const userMsg = buildUserMessage(Object.assign({datetime,
+    anomaly:$('anomaly').value.trim(), facilities:$('facilities').value.trim(), terrain:$('terrain').value.trim()}, loc));
 
   controller = new AbortController();
   try{
@@ -377,14 +426,29 @@ async function run(){
 
 function buildUserMessage(p){
   const jp = (v, dflt) => v ? v : dflt;
+
+  let locLines, closing;
+  if(p.mode === 'coord'){
+    locLines = [
+      '- 緯度: ' + p.lat,
+      '- 経度: ' + p.lon,
+      '- 地図（確認用）: https://www.google.com/maps?q=' + p.lat + ',' + p.lon
+    ];
+    closing = 'この地点・日時の周辺で開催されたイベント、最新ニュース、災害・気象情報、交通、SNSでの話題などをWeb検索で調べ、人流増加の要因を「事実」と「推定」を分けて分析してください。参照した情報源のURLも明記してください。';
+  }else{
+    locLines = [
+      '- 場所（住所・地名）: ' + p.address,
+      '- 地図（確認用）: https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(p.address)
+    ];
+    closing = 'まずこの「住所・地名」がどこを指すのかをWeb検索・地図で特定し（可能なら緯度経度も推定してレポート冒頭に明記）、そのうえで当該地点・日時の周辺で開催されたイベント、最新ニュース、災害・気象情報、交通、SNSでの話題などをWeb検索で調べ、人流増加の要因を「事実」と「推定」を分けて分析してください。参照した情報源のURLも明記してください。';
+  }
+
   return [
     '以下の観測情報について、人流アノマリー（異常な増加）の原因を分析し、Markdown形式でレポートを作成してください。',
     '',
     '## 観測情報',
-    '- 日時: ' + p.datetime.replace('T',' '),
-    '- 緯度: ' + p.lat,
-    '- 経度: ' + p.lon,
-    '- 地図（確認用）: https://www.google.com/maps?q=' + p.lat + ',' + p.lon,
+    '- 日時: ' + p.datetime.replace('T',' ')
+  ].concat(locLines).concat([
     '',
     '## 観測されたアノマリーの状況',
     jp(p.anomaly, '当該地点・時間帯において、付近で顕著な人流の増加が観測された。'),
@@ -395,8 +459,8 @@ function buildUserMessage(p){
     '## 参考情報（周辺地形）',
     jp(p.terrain, '（特に指定なし。必要に応じてWeb検索・地図で地形を確認してください。）'),
     '',
-    'この地点・日時の周辺で開催されたイベント、最新ニュース、災害・気象情報、交通、SNSでの話題などをWeb検索で調べ、人流増加の要因を「事実」と「推定」を分けて分析してください。参照した情報源のURLも明記してください。'
-  ].join('\n');
+    closing
+  ]).join('\n');
 }
 
 /* ---------- OpenAI Responses API 呼び出し（ストリーミング / Web検索） ---------- */
