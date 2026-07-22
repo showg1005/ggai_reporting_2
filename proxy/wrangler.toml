@@ -1,0 +1,26 @@
+# Cloudflare Workers 設定（wrangler CLI 用）
+# デプロイ:  npm i -g wrangler  →  wrangler login  →  wrangler deploy
+#
+# シークレット（キー・合言葉）は toml に書かず、CLIで登録してください:
+#   wrangler secret put OPENAI_API_KEY
+#   wrangler secret put APP_PASSWORD
+#
+# ダッシュボードから貼り付けてデプロイする場合は wrangler.toml は不要です
+# （proxy/README.md の「方法A: ダッシュボード」を参照）。
+
+name = "ggai-openai-proxy"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+
+[vars]
+# 公開アプリのオリジンに限定するのを推奨（"*" は誰でも呼べてしまう）
+ALLOWED_ORIGIN = "https://showg1005.github.io"
+# 1日あたりの上限回数（レート制限を使う場合。KV "RL" のバインドも必要）
+# DAILY_LIMIT = "30"
+
+# レート制限を使う場合のみ: KV namespace を作成してバインド
+# 作成:  wrangler kv namespace create RL
+# 出力された id を下に貼る
+# [[kv_namespaces]]
+# binding = "RL"
+# id = "<your-kv-namespace-id>"

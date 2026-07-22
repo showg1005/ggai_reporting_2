@@ -142,13 +142,46 @@
       <summary>API設定 <span class="caret" id="keyState"></span></summary>
       <div style="margin-top:14px">
         <div class="field">
-          <label for="apiKey">OpenAI APIキー <span class="hint">（端末内にのみ保存されます）</span></label>
-          <div class="keyrow">
-            <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
-            <button class="toggle-key" id="toggleKey" type="button">表示</button>
+          <label>接続方法</label>
+          <div class="segmented">
+            <button type="button" id="connProxyBtn" class="seg active">プロキシ経由</button>
+            <button type="button" id="connDirectBtn" class="seg">OpenAI直接</button>
           </div>
         </div>
-        <div class="field">
+
+        <!-- プロキシ経由（配布・共有用） -->
+        <div id="connProxy">
+          <div class="field">
+            <label for="proxyPass">合言葉（パスワード） <span class="hint">（配布者から共有されたもの）</span></label>
+            <div class="keyrow">
+              <input id="proxyPass" type="password" placeholder="合言葉を入力" autocomplete="off" spellcheck="false" />
+              <button class="toggle-key" id="togglePass" type="button">表示</button>
+            </div>
+          </div>
+          <div class="field">
+            <label for="proxyUrl">プロキシURL <span class="hint">（通常は設定済み）</span></label>
+            <input id="proxyUrl" type="url" placeholder="https://xxxxx.workers.dev" autocomplete="off" spellcheck="false" />
+          </div>
+          <div class="disclaimer">
+            OpenAIのキーはサーバー（プロキシ）側で管理され、アプリには保存されません。利用者は<strong>合言葉</strong>を入力するだけで使えます。合言葉・プロキシURLは端末内にのみ保存されます。
+          </div>
+        </div>
+
+        <!-- OpenAI直接（開発・自分のキー） -->
+        <div id="connDirect" style="display:none">
+          <div class="field">
+            <label for="apiKey">OpenAI APIキー <span class="hint">（端末内にのみ保存されます）</span></label>
+            <div class="keyrow">
+              <input id="apiKey" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" />
+              <button class="toggle-key" id="toggleKey" type="button">表示</button>
+            </div>
+          </div>
+          <div class="disclaimer">
+            APIキーは <code>platform.openai.com/api-keys</code> で取得できます。端末内ストレージにのみ保存され、OpenAI API へのリクエストにのみ使用します。<strong>公開URLからの直接呼び出しはCORSでブロックされる場合があります</strong>（その場合はプロキシ経由を使用）。
+          </div>
+        </div>
+
+        <div class="field" style="margin-top:14px">
           <label for="model">モデル <span class="hint">（Web検索対応モデルを指定）</span></label>
           <input id="model" list="modelList" placeholder="gpt-5.6" autocomplete="off" spellcheck="false" />
           <datalist id="modelList">
@@ -158,9 +191,6 @@
             <option value="gpt-4.1"></option>
             <option value="gpt-4o"></option>
           </datalist>
-        </div>
-        <div class="disclaimer">
-          APIキーは <code>platform.openai.com/api-keys</code> で取得できます。キーはこのブラウザの端末内ストレージにのみ保存され、外部サーバーには送信されません（OpenAI API へのリクエストのみに使用します）。モデル名は、お使いのアカウントで利用可能な<strong>Web検索対応モデル</strong>に変更してください。
         </div>
       </div>
     </details>
@@ -255,7 +285,11 @@
 const $ = (id) => document.getElementById(id);
 const LS_KEY = 'ggai_report_settings_v2';
 const DEFAULT_MODEL = 'gpt-5.6';
-let locMode = 'coord'; // 'coord' | 'addr'
+// 配布者が Cloudflare Worker をデプロイしたら、この定数にそのURLを設定すると
+// 利用者はプロキシURLを入力せず「合言葉」だけで使えます（空の場合は設定画面で入力）。
+const PROXY_URL = '';
+let locMode = 'coord';   // 位置指定: 'coord' | 'addr'
+let connMode = 'proxy';  // 接続方法: 'proxy' | 'direct'
 
 /* ---------- システムプロンプト（アナリストの人格・スタンス） ---------- */
 const SYSTEM_PROMPT = `あなたは要因を徹底的に深掘りするデータサイエンティスト兼、位置情報に詳しいアナリストです。
@@ -289,17 +323,31 @@ function loadSettings(){
     if(s.apiKey) $('apiKey').value = s.apiKey;
     if(s.model) $('model').value = s.model;
     if(s.mode) locMode = s.mode;
+    if(s.conn) connMode = s.conn;
+    if(s.proxyUrl) $('proxyUrl').value = s.proxyUrl;
+    if(s.pass) $('proxyPass').value = s.pass;
   }catch(e){}
   if(!$('model').value) $('model').value = DEFAULT_MODEL;
+  if(!$('proxyUrl').value && PROXY_URL) $('proxyUrl').value = PROXY_URL;
   applyMode();
+  applyConn();
   updateKeyState();
 }
 function saveSettings(){
-  localStorage.setItem(LS_KEY, JSON.stringify({apiKey:$('apiKey').value.trim(), model:$('model').value, mode:locMode}));
+  localStorage.setItem(LS_KEY, JSON.stringify({
+    apiKey:$('apiKey').value.trim(),
+    model:$('model').value,
+    mode:locMode,
+    conn:connMode,
+    proxyUrl:$('proxyUrl').value.trim(),
+    pass:$('proxyPass').value
+  }));
   updateKeyState();
 }
 function updateKeyState(){
-  const has = !!$('apiKey').value.trim();
+  const has = connMode === 'proxy'
+    ? !!$('proxyPass').value.trim() && !!($('proxyUrl').value.trim() || PROXY_URL)
+    : !!$('apiKey').value.trim();
   $('keyState').textContent = has ? '設定済み ✓' : '未設定';
   $('keyState').style.color = has ? 'var(--ok)' : 'var(--warn)';
 }
@@ -314,6 +362,16 @@ function applyMode(){
 }
 function setMode(mode){ locMode = mode; applyMode(); saveSettings(); }
 
+/* ---------- 接続方法の切替 ---------- */
+function applyConn(){
+  const proxy = connMode === 'proxy';
+  $('connProxy').style.display = proxy ? '' : 'none';
+  $('connDirect').style.display = proxy ? 'none' : '';
+  $('connProxyBtn').classList.toggle('active', proxy);
+  $('connDirectBtn').classList.toggle('active', !proxy);
+}
+function setConn(mode){ connMode = mode; applyConn(); updateKeyState(); saveSettings(); }
+
 /* ---------- 初期化 ---------- */
 function init(){
   loadSettings();
@@ -323,14 +381,25 @@ function init(){
   $('datetime').value = now.toISOString().slice(0,16);
 
   $('apiKey').addEventListener('input', saveSettings);
+  $('proxyUrl').addEventListener('input', saveSettings);
+  $('proxyPass').addEventListener('input', saveSettings);
   $('model').addEventListener('change', saveSettings);
-  if(!$('apiKey').value.trim()) $('settings').open = true;
+  $('connProxyBtn').addEventListener('click', ()=>setConn('proxy'));
+  $('connDirectBtn').addEventListener('click', ()=>setConn('direct'));
 
-  $('toggleKey').addEventListener('click', ()=>{
-    const el = $('apiKey');
+  // 資格情報が未設定なら設定を開く
+  const ready = connMode==='proxy'
+    ? ($('proxyPass').value.trim() && ($('proxyUrl').value.trim()||PROXY_URL))
+    : $('apiKey').value.trim();
+  if(!ready) $('settings').open = true;
+
+  const mkToggle = (inputId, btnId)=> $(btnId).addEventListener('click', ()=>{
+    const el = $(inputId);
     el.type = el.type === 'password' ? 'text' : 'password';
-    $('toggleKey').textContent = el.type === 'password' ? '表示' : '隠す';
+    $(btnId).textContent = el.type === 'password' ? '表示' : '隠す';
   });
+  mkToggle('apiKey','toggleKey');
+  mkToggle('proxyPass','togglePass');
   $('modeCoord').addEventListener('click', ()=>setMode('coord'));
   $('modeAddr').addEventListener('click', ()=>setMode('addr'));
   $('geoBtn').addEventListener('click', geolocate);
@@ -376,10 +445,23 @@ let rawReport = '';
 
 async function run(){
   clearError();
-  const apiKey = $('apiKey').value.trim();
   const datetime = $('datetime').value;
 
-  if(!apiKey){ showError('APIキーを設定してください（上部の「API設定」）。'); $('settings').open=true; return; }
+  // 接続先（プロキシ経由 or OpenAI直接）
+  let endpoint, headers;
+  if(connMode === 'proxy'){
+    const url = ($('proxyUrl').value.trim() || PROXY_URL).replace(/\/+$/,'');
+    const pass = $('proxyPass').value.trim();
+    if(!url){ showError('プロキシURLを設定してください（上部の「API設定」）。'); $('settings').open=true; return; }
+    if(!pass){ showError('合言葉を入力してください（上部の「API設定」）。'); $('settings').open=true; return; }
+    endpoint = url;
+    headers = {'x-app-password': pass};
+  }else{
+    const apiKey = $('apiKey').value.trim();
+    if(!apiKey){ showError('OpenAI APIキーを設定してください（上部の「API設定」）。'); $('settings').open=true; return; }
+    endpoint = 'https://api.openai.com/v1/responses';
+    headers = {'authorization':'Bearer ' + apiKey};
+  }
   if(!datetime){ showError('日時を入力してください。'); return; }
 
   // 位置（緯度経度 または 住所・地名）
@@ -407,7 +489,7 @@ async function run(){
 
   controller = new AbortController();
   try{
-    await callOpenAI(apiKey, $('model').value.trim() || DEFAULT_MODEL, userMsg);
+    await callModel(endpoint, headers, $('model').value.trim() || DEFAULT_MODEL, userMsg);
     $('statusText').textContent = '完了しました。';
     $('statusCard').classList.remove('active');
   }catch(err){
@@ -463,10 +545,13 @@ function buildUserMessage(p){
   ]).join('\n');
 }
 
-/* ---------- OpenAI Responses API 呼び出し（ストリーミング / Web検索） ---------- */
-async function callOpenAI(apiKey, model, userText){
+/* ---------- モデル呼び出し（OpenAI直接 or プロキシ経由・共通） ----------
+   endpoint と extraHeaders だけが接続方法によって変わり、
+   リクエストボディ（Responses API 形式）とストリーム解析は共通。 */
+async function callModel(endpoint, extraHeaders, model, userText){
   let searchCount = 0, textStarted = false;
   const seenSearch = {};
+  const viaProxy = connMode === 'proxy';
 
   const body = {
     model: model,
@@ -479,26 +564,26 @@ async function callOpenAI(apiKey, model, userText){
 
   let resp;
   try{
-    resp = await fetch('https://api.openai.com/v1/responses', {
+    resp = await fetch(endpoint, {
       method:'POST',
-      headers:{
-        'content-type':'application/json',
-        'authorization':'Bearer ' + apiKey
-      },
+      headers: Object.assign({'content-type':'application/json'}, extraHeaders),
       body: JSON.stringify(body),
       signal: controller.signal
     });
   }catch(e){
     if(e.name === 'AbortError') throw e;
-    throw new Error('OpenAIに接続できませんでした（ネットワークまたはCORS）。公開URLからのブラウザ直接呼び出しがブロックされている可能性があります。その場合はプロキシ経由が必要です。詳細: ' + (e.message || e));
+    const where = viaProxy ? 'プロキシ' : 'OpenAI';
+    throw new Error(where + 'に接続できませんでした（ネットワークまたはCORS）。'
+      + (viaProxy ? 'プロキシURLとCORS設定（ALLOWED_ORIGIN）を確認してください。' : '公開URLからの直接呼び出しはブロックされる場合があります。その場合はプロキシ経由をご利用ください。')
+      + ' 詳細: ' + (e.message || e));
   }
 
   if(!resp.ok){
     let detail = 'HTTP ' + resp.status;
     try{ const j = await resp.json(); if(j.error && j.error.message) detail = j.error.message; }catch(e){}
-    if(resp.status===401) detail = 'APIキーが無効です。設定を確認してください。';
-    if(resp.status===404) detail = 'モデルが見つからないか利用できません（' + model + '）。利用可能なモデル名に変更してください。';
-    if(resp.status===429) detail = 'レート制限、または残高不足の可能性があります。少し待って再実行してください。';
+    if(resp.status===401) detail = viaProxy ? '認証に失敗しました。合言葉を確認してください。' : 'APIキーが無効です。設定を確認してください。';
+    if(resp.status===404 && !viaProxy) detail = 'モデルが見つからないか利用できません（' + model + '）。利用可能なモデル名に変更してください。';
+    if(resp.status===429) detail = '利用上限またはレート制限に達しました。少し待って再実行してください。';
     throw new Error(detail);
   }
 
